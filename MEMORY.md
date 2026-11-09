@@ -1,4 +1,5 @@
-# MEMORY — DataHack
+# MEMORY — GradPath
+O projeto atende pelo nome oficial de **GradPath** (desafio *Rota do Diploma*, UNIVAG DataHack 2026).
 Scripts Python com pandas que filtram os microdados educacionais de Mato Grosso (CO_UF = 51) e geram os CSVs de saída para o Power BI. Sem banco de dados.
 
 ## Stack

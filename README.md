@@ -1,6 +1,6 @@
-# 🎓 DATAHACK: Mato Grosso Higher Education Trajectory & Dropout Analytics
+# 🎓 GRADPATH: Higher Education Trajectory & Dropout Analytics
 
-A Python/Pandas pipeline that turns raw Inep/MEC microdata into dropout and retention indicators for higher education in Mato Grosso, ready for Power BI.
+GradPath is an academic data engineering and analytics pipeline built for the UNIVAG DataHack 2026 challenge (*Rota do Diploma*). It transforms raw Inep/MEC microdata into actionable dropout and retention indicators for higher education in Mato Grosso, structured for interactive Power BI dashboards.
 
 [![Category](https://img.shields.io/badge/CATEGORY-ACADEMIC%20PROJECT-e0004d?style=for-the-badge)](#) [![UNIVAG](https://img.shields.io/badge/UNIVAG-DATAHACK%202026-00c8ff?style=for-the-badge)](#) [![License](https://img.shields.io/badge/LICENSE-MIT-76b900?style=for-the-badge)](#)
 
@@ -8,7 +8,7 @@ A Python/Pandas pipeline that turns raw Inep/MEC microdata into dropout and rete
 
 ## 📌 Project Overview
 
-DATAHACK was built for the UNIVAG DataHack 2026 challenge *Rota do Diploma*. It analyzes the trajectory of undergraduate students in Mato Grosso (`CO_UF = 51`) using official Inep/MEC data: the Higher Education Census, the Student Trajectory indicators, and the CPC/Enade quality indicators, complemented by IBGE population data.
+GradPath was built for the UNIVAG DataHack 2026 challenge *Rota do Diploma*. It analyzes the trajectory of undergraduate students in Mato Grosso (`CO_UF = 51`) using official Inep/MEC data: the Higher Education Census, the Student Trajectory indicators, and the CPC/Enade quality indicators, complemented by IBGE population data.
 
 The pipeline filters the raw files in memory, computes the indicators with Pandas, and writes deterministic CSVs to `outputs/` for the Power BI dashboard. Results describe statistical association, not causality, and groups with fewer than 10 students are suppressed.
 

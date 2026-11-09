@@ -6,7 +6,7 @@
    JSON bruto em data/raw/ibge/ (cache).
 3. Calcula P3, B1 e B2 com pandas (src/analytics.py) e grava outputs/p3_*.csv, b1_*.csv e b2_*.csv.
 
-Uso:  python src/02_census_processing.py [--raw data/raw/inep_censo_microdados] [--atualizar-ibge]
+Uso:  python src/02_census_processing.py [--raw data/raw/inep_censo_microdados] [--refresh-ibge]
 """
 from __future__ import annotations
 
@@ -20,13 +20,13 @@ from pathlib import Path
 import pandas as pd
 import requests
 
-from analytics import b1_desertos, b2_financiamento, p3_evasao_censo
-from common import RAW_DIR, ROOT, gravar_csv
+from analytics import b1_deserts, b2_financing, p3_census_dropout
+from common import RAW_DIR, ROOT, write_csv_atomic
 
 log = logging.getLogger("datahack.censo")
 
 UF_MT = "51"
-NIVEL_GRADUACAO = "1"
+UNDERGRAD_LEVEL = "1"
 ANOS = (2021, 2022, 2023, 2024)
 CHUNK = 100_000
 
@@ -40,7 +40,7 @@ COLS_INT = [
     "QT_MAT", "QT_CONC", "QT_SIT_TRANCADA", "QT_SIT_DESVINCULADO", "QT_SIT_TRANSFERIDO", "QT_SIT_FALECIDO",
 ]
 # Colunas mantidas em memória
-ORDEM = [
+COLUMN_ORDER = [
     "NU_ANO_CENSO", "CO_UF", "CO_MUNICIPIO", "NO_MUNICIPIO", "TP_ORGANIZACAO_ACADEMICA",
     "TP_CATEGORIA_ADMINISTRATIVA", "TP_REDE", "CO_IES", "CO_CURSO", "NO_CURSO",
     "CO_CINE_ROTULO", "NO_CINE_ROTULO", "CO_CINE_AREA_GERAL", "NO_CINE_AREA_GERAL",
@@ -58,40 +58,40 @@ IBGE_CACHE = RAW_DIR / "ibge" / "ibge_9514_mt_18_24_2022.json"
 
 
 # ----------------------------------------------------------------------- Censo
-def listar_csv_cursos(raiz: Path, anos: tuple[int, ...]) -> dict[int, Path]:
+def list_course_csvs(root_dir: Path, anos: tuple[int, ...]) -> dict[int, Path]:
     achados: dict[int, Path] = {}
-    for p in raiz.rglob("*.CSV"):
+    for p in root_dir.rglob("*.CSV"):
         m = re.fullmatch(r"MICRODADOS_.*CURSOS_(\d{4})\.CSV", p.name, flags=re.I)
         if m and int(m.group(1)) in anos:
             achados[int(m.group(1))] = p
     faltam = sorted(set(anos) - set(achados))
     if faltam:
-        raise SystemExit(f"CSV de Cursos ausente para {faltam} em {raiz}")
+        raise SystemExit(f"CSV de Cursos ausente para {faltam} em {root_dir}")
     return dict(sorted(achados.items()))
 
 
-def ler_csv_mt(path: Path) -> pd.DataFrame:
+def read_csv_mt(path: Path) -> pd.DataFrame:
     """Lê em chunks e filtra MT + Graduação por chunk; só o filtrado é acumulado."""
-    usar = lambda c: c in ORDEM
+    usar = lambda c: c in COLUMN_ORDER
     partes, lidas = [], 0
     for ch in pd.read_csv(path, sep=";", encoding="latin-1", dtype=str, usecols=usar, chunksize=CHUNK, low_memory=False):
         lidas += len(ch)
-        partes.append(ch[(ch["CO_UF"].str.strip() == UF_MT) & (ch["TP_NIVEL_ACADEMICO"].str.strip() == NIVEL_GRADUACAO)])
+        partes.append(ch[(ch["CO_UF"].str.strip() == UF_MT) & (ch["TP_NIVEL_ACADEMICO"].str.strip() == UNDERGRAD_LEVEL)])
     df = pd.concat(partes, ignore_index=True)
-    faltam = [c for c in ORDEM if c not in df.columns]
+    faltam = [c for c in COLUMN_ORDER if c not in df.columns]
     if faltam:
         raise ValueError(f"{path.name}: colunas ausentes {faltam}")
     log.info("censo %s: %s linhas lidas -> %s (MT, Graduação)", path.name, f"{lidas:,}", f"{len(df):,}")
-    return df[ORDEM]
+    return df[COLUMN_ORDER]
 
 
-def carregar_censo(raiz: Path, anos: tuple[int, ...]) -> pd.DataFrame:
-    df = pd.concat([ler_csv_mt(p) for p in listar_csv_cursos(raiz, anos).values()], ignore_index=True)
+def load_census(root_dir: Path, anos: tuple[int, ...]) -> pd.DataFrame:
+    df = pd.concat([read_csv_mt(p) for p in list_course_csvs(root_dir, anos).values()], ignore_index=True)
     for c in COLS_STR:
         df[c] = df[c].str.strip()
     for c in COLS_INT:
         df[c] = pd.to_numeric(df[c], errors="coerce").astype("Int64")
-    if set(df["CO_UF"]) != {UF_MT} or set(df["TP_NIVEL_ACADEMICO"]) != {NIVEL_GRADUACAO}:
+    if set(df["CO_UF"]) != {UF_MT} or set(df["TP_NIVEL_ACADEMICO"]) != {UNDERGRAD_LEVEL}:
         raise ValueError("Filtro falhou: restaram linhas fora de MT/Graduação")
     dup = int(df.duplicated(["NU_ANO_CENSO", "CO_CURSO", "CO_MUNICIPIO"]).sum())
     if dup:
@@ -102,8 +102,8 @@ def carregar_censo(raiz: Path, anos: tuple[int, ...]) -> pd.DataFrame:
 
 
 # ------------------------------------------------------------------------ IBGE
-def obter_populacao(atualizar: bool) -> pd.DataFrame:
-    if IBGE_CACHE.exists() and not atualizar:
+def get_population(refresh: bool) -> pd.DataFrame:
+    if IBGE_CACHE.exists() and not refresh:
         linhas = json.loads(IBGE_CACHE.read_text(encoding="utf-8"))
         log.info("IBGE: cache %s", IBGE_CACHE.relative_to(ROOT))
     else:
@@ -138,13 +138,13 @@ def obter_populacao(atualizar: bool) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------- Saídas
-def extrair(censo: pd.DataFrame, ibge: pd.DataFrame, out: Path) -> None:
-    p3 = p3_evasao_censo(censo)
-    gravar_csv(p3, out / "p3_evasao_censo.csv")
-    b1 = b1_desertos(censo, ibge)
-    gravar_csv(b1, out / "b1_desertos_ensino_superior.csv")
-    b2 = b2_financiamento(censo)
-    gravar_csv(b2, out / "b2_financiamento_permanencia.csv")
+def extract(censo: pd.DataFrame, ibge: pd.DataFrame, out: Path) -> None:
+    p3 = p3_census_dropout(censo)
+    write_csv_atomic(p3, out / "p3_evasao_censo.csv")
+    b1 = b1_deserts(censo, ibge)
+    write_csv_atomic(b1, out / "b1_desertos_ensino_superior.csv")
+    b2 = b2_financing(censo)
+    write_csv_atomic(b2, out / "b2_financiamento_permanencia.csv")
     if p3.empty or b1.empty or b2.empty:
         raise RuntimeError("Alguma consulta retornou vazio — verifique a carga.")
     log.info("P3: %d células | B1: %d municípios, %d desertos | B2: %d células",
@@ -157,17 +157,17 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--raw", default=str(RAW_DIR / "inep_censo_microdados"))
     ap.add_argument("--out", default=str(ROOT / "outputs"))
     ap.add_argument("--anos", type=int, nargs="+", default=list(ANOS))
-    ap.add_argument("--atualizar-ibge", action="store_true", help="ignora o cache e baixa o SIDRA de novo")
+    ap.add_argument("--refresh-ibge", action="store_true", help="ignora o cache e baixa o SIDRA de novo")
     a = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
     log.info("[1/3] Leitura e filtro em memória (Censo)")
-    censo = carregar_censo(Path(a.raw), tuple(a.anos)).rename(columns=str.lower)
+    censo = load_census(Path(a.raw), tuple(a.anos)).rename(columns=str.lower)
     log.info("[2/3] População IBGE")
-    ibge = obter_populacao(a.atualizar_ibge)
+    ibge = get_population(a.refresh_ibge)
     log.info("Linhas do Censo sem município no IBGE: %d", int((~censo["co_municipio"].isin(ibge["co_municipio"])).sum()))
     log.info("[3/3] P3, B1 e B2 em pandas")
-    extrair(censo, ibge, Path(a.out))
+    extract(censo, ibge, Path(a.out))
     return 0
 
 

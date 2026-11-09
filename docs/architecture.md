@@ -18,7 +18,7 @@ dashboard/                  (Power BI lê os CSVs)
 
 | Arquivo | Responsabilidade |
 |---|---|
-| `src/common.py` | Raiz do projeto, `RAW_DIR` (`data/raw/`) e gravação atômica de CSV (`gravar_csv`) |
+| `src/common.py` | Raiz do projeto, `RAW_DIR` (`data/raw/`) e gravação atômica de CSV (`write_csv_atomic`) |
 | `src/analytics.py` | Indicadores P1 a P5, B1 e B2 em pandas, a partir dos DataFrames filtrados |
 | `src/01_trajectory_ingestion.py` | Trajetória (INEP): leitura + filtro, P1 e P2 |
 | `src/02_census_processing.py` | Censo 2021-2024 em chunks (MT + Graduação) + população 18-24 do SIDRA 9514 (cache em `data/raw/ibge/`): P3, B1 e B2 |
@@ -30,13 +30,13 @@ Os filtros (CO_UF='51', Presencial, coortes, 5º ano, grupos >= 10) são literai
 
 | Função | Saída |
 |---|---|
-| `p1_trajetoria` | `p1_trajetoria_2015.csv`: coorte 2015 presencial, TDA/TCA/TAP ponderadas e ano de maior perda |
-| `p2_ranking_desistencia` | `p2_ranking_desistencia.csv`: ranking por CINE, coortes 2015 vs 2020 no 5º ano, grupos < 10 omitidos |
-| `p3_evasao_censo` | `p3_evasao_censo.csv`: evasão anual por ano × rede × modalidade |
-| `b1_desertos` | `b1_desertos_ensino_superior.csv`: vagas presenciais 2024 por 100 jovens de 18-24 e municípios sem oferta |
-| `b2_financiamento` | `b2_financiamento_permanencia.csv`: evasão na rede privada, alta vs baixa adesão a FIES/ProUni |
-| `p4_cpc_vs_desistencia` | `p4_cpc_vs_desistencia.csv`: CPC (Faixa e Contínuo) x TDA no 5º ano, com correlações |
-| `p5_funil_licenciaturas` | `p5_funil_licenciaturas.csv`: TDA x proficiência no Enade 2025 e funil crítico por área |
+| `p1_trajectory` | `p1_trajetoria_2015.csv`: coorte 2015 presencial, TDA/TCA/TAP ponderadas e ano de maior perda |
+| `p2_dropout_ranking` | `p2_ranking_desistencia.csv`: ranking por CINE, coortes 2015 vs 2020 no 5º ano, grupos < 10 omitidos |
+| `p3_census_dropout` | `p3_evasao_censo.csv`: evasão anual por ano × rede × modalidade |
+| `b1_deserts` | `b1_desertos_ensino_superior.csv`: vagas presenciais 2024 por 100 jovens de 18-24 e municípios sem oferta |
+| `b2_financing` | `b2_financiamento_permanencia.csv`: evasão na rede privada, alta vs baixa adesão a FIES/ProUni |
+| `p4_cpc_vs_dropout` | `p4_cpc_vs_desistencia.csv`: CPC (Faixa e Contínuo) x TDA no 5º ano, com correlações |
+| `p5_teaching_degree_funnel` | `p5_funil_licenciaturas.csv`: TDA x proficiência no Enade 2025 e funil crítico por área |
 
 ## Execução
 
@@ -47,6 +47,6 @@ python src/02_census_processing.py
 python src/03_education_quality.py
 ```
 
-Opções: `--raw` (pasta dos dados brutos) e `--out` (pasta dos CSVs). O `02_census_processing.py` aceita ainda `--atualizar-ibge`; o `03_education_quality.py`, `--traj`.
+Opções: `--raw` (pasta dos dados brutos) e `--out` (pasta dos CSVs). O `02_census_processing.py` aceita ainda `--refresh-ibge`; o `03_education_quality.py`, `--traj`.
 
 Decisões e justificativas em `docs/strategy.md`.

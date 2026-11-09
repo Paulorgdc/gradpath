@@ -1,6 +1,6 @@
 """Indicadores P1 a P5, B1 e B2 em pandas, a partir dos DataFrames filtrados de Mato Grosso.
 
-Regras comuns: taxas ponderadas por qt_ingressante; grupos com menos de 10 alunos são suprimidos;
+Regras comuns: taxas ponderadas por qt_ingressante; build_groups com menos de 10 alunos são suprimidos;
 os resultados descrevem associação estatística, sem alegação de causalidade.
 Colunas em minúsculas (ex.: co_curso, qt_ingressante).
 """
@@ -9,27 +9,27 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-MIN_GRUPO = 10
-GRAUS_GRADUACAO = ["1", "2", "3"]
+MIN_GROUP = 10
+UNDERGRAD_DEGREES = ["1", "2", "3"]
 
 
-def _soma(s: pd.Series):
+def _safe_sum(s: pd.Series):
     return s.sum(min_count=1)  # tudo nulo -> nulo
 
 
-def _ponderada(df: pd.DataFrame, cols: list[str], peso: str, chaves: list[str]) -> pd.DataFrame:
+def _weighted(df: pd.DataFrame, cols: list[str], peso: str, keys: list[str]) -> pd.DataFrame:
     """Média ponderada por `peso` de cada coluna em `cols`, por grupo."""
     w = df[peso].astype("float64")
-    aux = df[chaves].copy()
+    aux = df[keys].copy()
     aux["_w"] = w
     for c in cols:
         aux[c] = df[c].astype("float64") * w
-    g = aux.groupby(chaves, dropna=False, sort=False)
+    g = aux.groupby(keys, dropna=False, sort=False)
     soma = g[["_w", *cols]].sum()
     return soma[cols].div(soma["_w"], axis=0)
 
 
-def _ano_do_curso(df: pd.DataFrame) -> pd.Series:
+def _course_year(df: pd.DataFrame) -> pd.Series:
     return (df["nu_ano_referencia"] - df["nu_ano_ingresso"] + 1).astype("int64")
 
 
@@ -38,25 +38,25 @@ def _num(s: pd.Series) -> pd.Series:
 
 
 # ------------------------------------------------------------------ Trajetória
-def p1_trajetoria(traj: pd.DataFrame) -> pd.DataFrame:
+def p1_trajectory(traj: pd.DataFrame) -> pd.DataFrame:
     """Coorte 2015, Presencial, MT, Graduação, 2015-2024: TDA/TCA/TAP/TADA ponderadas por ano."""
     t = traj[
-        (traj["co_uf"] == "51") & traj["tp_grau_academico"].isin(GRAUS_GRADUACAO)
+        (traj["co_uf"] == "51") & traj["tp_grau_academico"].isin(UNDERGRAD_DEGREES)
         & (traj["tp_modalidade_ensino"] == "1") & (traj["nu_ano_ingresso"] == 2015)
         & (traj["qt_ingressante"] > 0)
         & traj[["tda", "tca", "tap", "tada"]].notna().all(axis=1)
     ].copy()
-    t["ano_do_curso"] = _ano_do_curso(t)
-    chaves = ["nu_ano_ingresso", "nu_ano_referencia", "ano_do_curso"]
-    pond = _ponderada(t, ["tda", "tca", "tap", "tada"], "qt_ingressante", chaves)
-    g = t.groupby(chaves, sort=False)
+    t["ano_do_curso"] = _course_year(t)
+    keys = ["nu_ano_ingresso", "nu_ano_referencia", "ano_do_curso"]
+    pond = _weighted(t, ["tda", "tca", "tap", "tada"], "qt_ingressante", keys)
+    g = t.groupby(keys, sort=False)
     ano = pd.DataFrame({
         "n_cursos": g["co_curso"].nunique(),
         "qt_ingressantes": g["qt_ingressante"].sum(),
-        "qt_desistencia_ano": g["qt_desistencia"].apply(_soma),
-        "qt_conclusao_ano": g["qt_concluinte"].apply(_soma),
+        "qt_desistencia_ano": g["qt_desistencia"].apply(_safe_sum),
+        "qt_conclusao_ano": g["qt_concluinte"].apply(_safe_sum),
     }).join(pond.add_suffix("_pct")).reset_index()
-    ano = ano[ano["qt_ingressantes"] >= MIN_GRUPO].sort_values("nu_ano_referencia").reset_index(drop=True)
+    ano = ano[ano["qt_ingressantes"] >= MIN_GROUP].sort_values("nu_ano_referencia").reset_index(drop=True)
     return pd.DataFrame({
         "coorte": ano["nu_ano_ingresso"], "ano_referencia": ano["nu_ano_referencia"],
         "ano_do_curso": ano["ano_do_curso"], "n_cursos": ano["n_cursos"],
@@ -69,27 +69,27 @@ def p1_trajetoria(traj: pd.DataFrame) -> pd.DataFrame:
     })
 
 
-def p2_ranking_desistencia(traj: pd.DataFrame) -> pd.DataFrame:
+def p2_dropout_ranking(traj: pd.DataFrame) -> pd.DataFrame:
     """Ranking de TDA por CINE rótulo e área geral: coortes 2015 e 2020 no 5º ano, Presencial."""
     t = traj[
-        (traj["co_uf"] == "51") & traj["tp_grau_academico"].isin(GRAUS_GRADUACAO)
+        (traj["co_uf"] == "51") & traj["tp_grau_academico"].isin(UNDERGRAD_DEGREES)
         & (traj["tp_modalidade_ensino"] == "1") & traj["nu_ano_ingresso"].isin([2015, 2020])
         & (traj["qt_ingressante"] > 0) & traj[["tda", "tca", "tap"]].notna().all(axis=1)
     ].copy()
-    t = t[_ano_do_curso(t) == 5]
+    t = t[_course_year(t) == 5]
 
-    def agrupar(nivel: str, chaves: list[str]) -> pd.DataFrame:
-        k = ["nu_ano_ingresso", *chaves]
-        pond = _ponderada(t, ["tda", "tca", "tap"], "qt_ingressante", k)
+    def group_by_level(nivel: str, keys: list[str]) -> pd.DataFrame:
+        k = ["nu_ano_ingresso", *keys]
+        pond = _weighted(t, ["tda", "tca", "tap"], "qt_ingressante", k)
         g = t.groupby(k, dropna=False, sort=False)
         r = pd.DataFrame({"n_cursos": g["co_curso"].nunique(), "qt_ingressantes": g["qt_ingressante"].sum()})
         r = r.join(pond.add_suffix("_pct")).reset_index()
-        r = r[r["qt_ingressantes"] >= MIN_GRUPO].copy()
+        r = r[r["qt_ingressantes"] >= MIN_GROUP].copy()
         r.insert(0, "nivel", nivel)
         return r
 
     rot = ["co_cine_rotulo", "no_cine_rotulo", "co_cine_area_geral", "no_cine_area_geral"]
-    u = pd.concat([agrupar("CINE_ROTULO", rot), agrupar("CINE_AREA_GERAL", ["co_cine_area_geral", "no_cine_area_geral"])],
+    u = pd.concat([group_by_level("CINE_ROTULO", rot), group_by_level("CINE_AREA_GERAL", ["co_cine_area_geral", "no_cine_area_geral"])],
                   ignore_index=True).rename(columns={"nu_ano_ingresso": "coorte"})
     u["chave"] = u["co_cine_rotulo"].fillna(u["co_cine_area_geral"])
     part = u.groupby(["nivel", "coorte"])
@@ -106,7 +106,7 @@ def p2_ranking_desistencia(traj: pd.DataFrame) -> pd.DataFrame:
 
 
 # ----------------------------------------------------------------------- Censo
-def _grupo_rede(c: pd.DataFrame) -> pd.Series:
+def _network_group(c: pd.DataFrame) -> pd.Series:
     return np.select(
         [c["tp_rede"] == "1", c["tp_categoria_administrativa"] == "4", c["tp_categoria_administrativa"] == "5"],
         ["Pública", "Privada com fins lucrativos", "Privada sem fins lucrativos"],
@@ -114,7 +114,7 @@ def _grupo_rede(c: pd.DataFrame) -> pd.Series:
     )
 
 
-def _modalidade(s: pd.Series) -> pd.Series:
+def _modality(s: pd.Series) -> pd.Series:
     return s.map({"1": "Presencial", "2": "EAD"})
 
 
@@ -123,31 +123,31 @@ def _pct(num: pd.Series, den: pd.Series, casas: int) -> pd.Series:
     return (100.0 * num.astype("float64") / den).round(casas)
 
 
-def p3_evasao_censo(censo: pd.DataFrame) -> pd.DataFrame:
+def p3_census_dropout(censo: pd.DataFrame) -> pd.DataFrame:
     """Evasão anual 2021-2024 = desvinculados / (matriculados + desvinculados + transferidos)."""
     c = censo[(censo["co_uf"] == "51") & (censo["tp_nivel_academico"] == "1") & censo["nu_ano_censo"].between(2021, 2024)]
     k = ["nu_ano_censo", "co_curso", "tp_rede", "tp_categoria_administrativa", "tp_modalidade_ensino"]
     cursos = c.groupby(k, dropna=False).agg(
-        qt_mat=("qt_mat", _soma), qt_desvinculado=("qt_sit_desvinculado", _soma),
-        qt_transferido=("qt_sit_transferido", _soma)).reset_index()  # EAD: soma os polos de MT por curso
-    cursos["grupo_rede"] = _grupo_rede(cursos)
-    cursos["modalidade"] = _modalidade(cursos["tp_modalidade_ensino"])
+        qt_mat=("qt_mat", _safe_sum), qt_desvinculado=("qt_sit_desvinculado", _safe_sum),
+        qt_transferido=("qt_sit_transferido", _safe_sum)).reset_index()  # EAD: soma os polos de MT por curso
+    cursos["grupo_rede"] = _network_group(cursos)
+    cursos["modalidade"] = _modality(cursos["tp_modalidade_ensino"])
     cursos["base"] = cursos["qt_mat"] + cursos["qt_desvinculado"] + cursos["qt_transferido"]
     kg = ["nu_ano_censo", "tp_rede", "grupo_rede", "tp_modalidade_ensino", "modalidade"]
     g = cursos.groupby(kg, dropna=False)
-    r = g.agg(n_cursos=("co_curso", "nunique"), qt_mat=("qt_mat", _soma), qt_desvinculado=("qt_desvinculado", _soma),
-              qt_transferido=("qt_transferido", _soma), base_alunos=("base", _soma)).reset_index()
-    r = r[r["base_alunos"] >= MIN_GRUPO].copy()
+    r = g.agg(n_cursos=("co_curso", "nunique"), qt_mat=("qt_mat", _safe_sum), qt_desvinculado=("qt_desvinculado", _safe_sum),
+              qt_transferido=("qt_transferido", _safe_sum), base_alunos=("base", _safe_sum)).reset_index()
+    r = r[r["base_alunos"] >= MIN_GROUP].copy()
     r["evasao_anual_pct"] = _pct(r["qt_desvinculado"], r["base_alunos"], 4)
     return r.sort_values(["nu_ano_censo", "tp_rede", "grupo_rede", "tp_modalidade_ensino"]).reset_index(drop=True)
 
 
-def b1_desertos(censo: pd.DataFrame, ibge: pd.DataFrame) -> pd.DataFrame:
+def b1_deserts(censo: pd.DataFrame, ibge: pd.DataFrame) -> pd.DataFrame:
     """Vagas presenciais 2024 por 100 jovens de 18-24 anos; municípios sem oferta = deserto."""
     c = censo[(censo["co_uf"] == "51") & (censo["tp_nivel_academico"] == "1")
               & (censo["tp_modalidade_ensino"] == "1") & (censo["nu_ano_censo"] == 2024)]
     v = c.groupby("co_municipio").agg(
-        vagas_presenciais_2024=("qt_vg_total", _soma), n_cursos_presenciais=("co_curso", "nunique"),
+        vagas_presenciais_2024=("qt_vg_total", _safe_sum), n_cursos_presenciais=("co_curso", "nunique"),
         n_ies=("co_ies", "nunique")).reset_index()
     r = ibge[["co_municipio", "no_municipio", "pop_18_24"]].merge(v, on="co_municipio", how="left")
     for col in ("vagas_presenciais_2024", "n_cursos_presenciais", "n_ies"):
@@ -160,26 +160,26 @@ def b1_desertos(censo: pd.DataFrame, ibge: pd.DataFrame) -> pd.DataFrame:
               "vagas_por_100_jovens", "deserto"]]
 
 
-def b2_financiamento(censo: pd.DataFrame) -> pd.DataFrame:
+def b2_financing(censo: pd.DataFrame) -> pd.DataFrame:
     """Rede privada, 2021-2024: evasão anual em cursos de alta (>=10%) vs baixa adesão a FIES/ProUni."""
     c = censo[(censo["co_uf"] == "51") & (censo["tp_nivel_academico"] == "1") & (censo["tp_rede"] == "2")
               & censo["nu_ano_censo"].between(2021, 2024)].copy()
     c["qt_ing_financ"] = c["qt_ing_fies"] + c["qt_ing_prounii"] + c["qt_ing_prounip"]
     k = ["nu_ano_censo", "co_curso", "tp_modalidade_ensino"]
     cur = c.groupby(k, dropna=False).agg(
-        qt_ing=("qt_ing", _soma), qt_ing_financ=("qt_ing_financ", _soma), qt_mat=("qt_mat", _soma),
-        qt_desvinculado=("qt_sit_desvinculado", _soma), qt_transferido=("qt_sit_transferido", _soma)).reset_index()
+        qt_ing=("qt_ing", _safe_sum), qt_ing_financ=("qt_ing_financ", _safe_sum), qt_mat=("qt_mat", _safe_sum),
+        qt_desvinculado=("qt_sit_desvinculado", _safe_sum), qt_transferido=("qt_sit_transferido", _safe_sum)).reset_index()
     cur["prop"] = cur["qt_ing_financ"].astype("float64") / cur["qt_ing"].astype("float64").where(cur["qt_ing"] != 0)
     cur["grupo_adesao"] = np.where(cur["prop"] >= 0.10, "Alta adesão (>=10%)", "Baixa adesão (<10%)")
     cur = cur[cur["prop"].notna() & (cur["prop"] <= 1)].copy()  # sem ingressantes ou >100%: fora
     cur["base"] = cur["qt_mat"] + cur["qt_desvinculado"] + cur["qt_transferido"]
     kg = ["nu_ano_censo", "tp_modalidade_ensino", "grupo_adesao"]
     r = cur.groupby(kg, dropna=False).agg(
-        n_cursos=("co_curso", "nunique"), qt_ing=("qt_ing", _soma), qt_ing_financ=("qt_ing_financ", _soma),
-        qt_mat=("qt_mat", _soma), qt_desvinculado=("qt_desvinculado", _soma),
-        qt_transferido=("qt_transferido", _soma), base_alunos=("base", _soma)).reset_index()
-    r = r[r["base_alunos"] >= MIN_GRUPO].copy()
-    r["modalidade"] = _modalidade(r["tp_modalidade_ensino"])
+        n_cursos=("co_curso", "nunique"), qt_ing=("qt_ing", _safe_sum), qt_ing_financ=("qt_ing_financ", _safe_sum),
+        qt_mat=("qt_mat", _safe_sum), qt_desvinculado=("qt_desvinculado", _safe_sum),
+        qt_transferido=("qt_transferido", _safe_sum), base_alunos=("base", _safe_sum)).reset_index()
+    r = r[r["base_alunos"] >= MIN_GROUP].copy()
+    r["modalidade"] = _modality(r["tp_modalidade_ensino"])
     r["prop_financiados_pct"] = _pct(r["qt_ing_financ"], r["qt_ing"], 2)
     bruto = 100.0 * r["qt_desvinculado"].astype("float64") / r["base_alunos"].astype("float64").where(r["base_alunos"] != 0)
     baixa = bruto.where(r["grupo_adesao"] == "Baixa adesão (<10%)")
@@ -193,20 +193,20 @@ def b2_financiamento(censo: pd.DataFrame) -> pd.DataFrame:
 
 
 # -------------------------------------------------------------------- Qualidade
-def _tda_por_curso(traj: pd.DataFrame, graus: list[str], com_coortes: bool) -> pd.DataFrame:
+def _tda_by_course(traj: pd.DataFrame, graus: list[str], com_coortes: bool) -> pd.DataFrame:
     """TDA no 5º ano de acompanhamento, coortes agrupadas, ponderada por qt_ingressante; >= 10 ingressantes."""
     t = traj[(traj["co_uf"] == "51") & traj["tp_grau_academico"].isin(graus)
              & (traj["qt_ingressante"] > 0) & traj["tda"].notna()]
-    t = t[_ano_do_curso(t) == 5]
-    pond = _ponderada(t, ["tda"], "qt_ingressante", ["co_curso"])
+    t = t[_course_year(t) == 5]
+    pond = _weighted(t, ["tda"], "qt_ingressante", ["co_curso"])
     g = t.groupby("co_curso", sort=False)
     r = pd.DataFrame({"qt_ingressantes": g["qt_ingressante"].sum()}).join(pond.rename(columns={"tda": "tda_pct"}))
     if com_coortes:
         r["n_coortes"] = g["nu_ano_ingresso"].nunique()
-    return r[r["qt_ingressantes"] >= MIN_GRUPO].reset_index()
+    return r[r["qt_ingressantes"] >= MIN_GROUP].reset_index()
 
 
-def _distinto_por_curso(df: pd.DataFrame, ordem: list[str], asc: list[bool]) -> pd.DataFrame:
+def _distinct_by_course(df: pd.DataFrame, ordem: list[str], asc: list[bool]) -> pd.DataFrame:
     return df.sort_values(ordem, ascending=asc, na_position="last", kind="stable").drop_duplicates("co_curso")
 
 
@@ -216,15 +216,15 @@ def _ntile(n: int, k: int) -> np.ndarray:
     return np.repeat(np.arange(1, k + 1), tamanhos)
 
 
-def p4_cpc_vs_desistencia(traj: pd.DataFrame, cpc: pd.DataFrame) -> pd.DataFrame:
+def p4_cpc_vs_dropout(traj: pd.DataFrame, cpc: pd.DataFrame) -> pd.DataFrame:
     """CPC (Faixa e Contínuo) x TDA no 5º ano, com correlações de Pearson e Spearman."""
-    t = _tda_por_curso(traj, GRAUS_GRADUACAO, com_coortes=True)
+    t = _tda_by_course(traj, UNDERGRAD_DEGREES, com_coortes=True)
     c = cpc[cpc["sg_uf"] == "MT"].copy()
     c["cpc_continuo"] = _num(c["cpc_continuo"])
     c["cpc_faixa"] = _num(c["cpc_faixa"])
     c = c[c["cpc_faixa"].notna() & c["cpc_continuo"].notna()]
     c["qt_concluintes_participantes"] = _num(c["qt_concluintes_participantes"])
-    c = _distinto_por_curso(c, ["co_curso", "nu_ano_cpc", "qt_concluintes_participantes", "co_municipio"],
+    c = _distinct_by_course(c, ["co_curso", "nu_ano_cpc", "qt_concluintes_participantes", "co_municipio"],
                             [True, False, False, True])
     b = c[["co_curso", "cpc_faixa", "cpc_continuo"]].merge(t[["co_curso", "qt_ingressantes", "tda_pct"]], on="co_curso")
     b = b.sort_values("cpc_continuo", kind="stable").reset_index(drop=True)
@@ -236,32 +236,32 @@ def p4_cpc_vs_desistencia(traj: pd.DataFrame, cpc: pd.DataFrame) -> pd.DataFrame
     }
     b["_w"] = b["tda_pct"] * b["qt_ingressantes"]
 
-    def grupos(agrup: str, col: str, rotulo) -> pd.DataFrame:
+    def build_groups(agrup: str, col: str, rotulo) -> pd.DataFrame:
         g = b.groupby(col)
         r = pd.DataFrame({"n_cursos": g.size(), "qt_ingressantes": g["qt_ingressantes"].sum(),
                           "cpc_continuo_medio": g["cpc_continuo"].mean(), "_w": g["_w"].sum()}).reset_index()
         r["tda_pct"] = r["_w"] / r["qt_ingressantes"]
-        r = r[r["qt_ingressantes"] >= MIN_GRUPO]
+        r = r[r["qt_ingressantes"] >= MIN_GROUP]
         return pd.DataFrame({"agrupamento": agrup, "grupo": r[col].map(rotulo), "ordem": r[col],
                              "n_cursos": r["n_cursos"], "qt_ingressantes": r["qt_ingressantes"],
                              "cpc_continuo_medio": r["cpc_continuo_medio"].round(4), "tda_pct": r["tda_pct"].round(4)})
 
-    u = pd.concat([grupos("CPC_FAIXA", "cpc_faixa", lambda v: str(int(v))),
-                   grupos("CPC_CONTINUO_QUARTIL", "quartil_cpc", lambda v: f"Q{int(v)}")], ignore_index=True)
+    u = pd.concat([build_groups("CPC_FAIXA", "cpc_faixa", lambda v: str(int(v))),
+                   build_groups("CPC_CONTINUO_QUARTIL", "quartil_cpc", lambda v: f"Q{int(v)}")], ignore_index=True)
     u = u.sort_values(["agrupamento", "ordem"], ascending=[False, True], kind="stable").drop(columns="ordem")
     for nome, v in k.items():
         u[nome] = v
     return u.reset_index(drop=True)
 
 
-def p5_funil_licenciaturas(traj: pd.DataFrame, enade: pd.DataFrame) -> pd.DataFrame:
+def p5_teaching_degree_funnel(traj: pd.DataFrame, enade: pd.DataFrame) -> pd.DataFrame:
     """Licenciaturas: TDA x proficiência no Enade 2025 e funil crítico (TDA >= mediana e proficiência < mediana)."""
-    t = _tda_por_curso(traj, ["2"], com_coortes=False)
+    t = _tda_by_course(traj, ["2"], com_coortes=False)
     e = enade[enade["sg_uf"] == "MT"].copy()
     e["prop_proficiente_padrao1"] = _num(e["prop_proficiente_padrao1"])
     e["qt_concluintes_participantes"] = _num(e["qt_concluintes_participantes"])
-    e = e[e["prop_proficiente_padrao1"].notna() & (e["qt_concluintes_participantes"] >= MIN_GRUPO)]
-    e = _distinto_por_curso(e, ["co_curso", "qt_concluintes_participantes", "co_municipio"], [True, False, True])
+    e = e[e["prop_proficiente_padrao1"].notna() & (e["qt_concluintes_participantes"] >= MIN_GROUP)]
+    e = _distinct_by_course(e, ["co_curso", "qt_concluintes_participantes", "co_municipio"], [True, False, True])
     j = e.merge(t, on="co_curso")
     j["prop_proficiente_pct"] = 100.0 * j["prop_proficiente_padrao1"]
     med_tda, med_prof = j["tda_pct"].median(), j["prop_proficiente_pct"].median()

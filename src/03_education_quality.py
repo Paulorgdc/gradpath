@@ -4,8 +4,8 @@
    'Sigla da UF' = 'MT'. Códigos (curso, IES, município) são texto; '--', 'SC' (Sem Conceito) e
    vazios viram NULL, nunca zero.
 2. Lê a Trajetória (mesma leitura de src/01_trajectory_ingestion.py), registra a taxa de match por
-   co_curso e calcula P4 e P5 com pandas (src/analytics.py), gravando outputs/p4_cpc_vs_desistencia.csv
-   e outputs/p5_funil_licenciaturas.csv.
+   co_curso e calcula P4 e P5 com pandas (src/analytics.py), gravando outputs/p4_cpc_vs_dropout.csv
+   e outputs/p5_teaching_degree_funnel.csv.
 
 Uso:  python src/03_education_quality.py [--raw data/raw/inep_indicadores_qualidade] [--traj data/raw/inep_trajetoria]
 """
@@ -22,18 +22,18 @@ from pathlib import Path
 import openpyxl
 import pandas as pd
 
-from analytics import p4_cpc_vs_desistencia, p5_funil_licenciaturas
-from common import RAW_DIR, ROOT, gravar_csv
+from analytics import p4_cpc_vs_dropout, p5_teaching_degree_funnel
+from common import RAW_DIR, ROOT, write_csv_atomic
 
 log = logging.getLogger("datahack.qualidade")
 
 UF = "MT"
-NULOS = {"", "--", "-", "SC", "S/C", "NA", "N/A", "ND", "*", "NAN", "NONE"}  # Sem Conceito / sem dado
+NULL_TOKENS = {"", "--", "-", "SC", "S/C", "NA", "N/A", "ND", "*", "NAN", "NONE"}  # Sem Conceito / sem dado
 
 # Cabeçalho normalizado (sem acento, minúsculo, sem pontuação) -> coluna do DataFrame.
-COMUNS = [
+COMMON_COLUMNS = [
     (r"^ano$", "nu_ano"), (r"^codigo da area$", "co_area"), (r"^area de avaliacao$", "no_area_avaliacao"),
-    (r"^grau academico$", "no_grau_academico"), (r"^codigo da ies$", "co_ies"), (r"^nome da ies$", "no_ies"),
+    (r"^grau academico$", "no_grau_academico"), (r"^codigo da ies$", "co_ies"), (r"^label da ies$", "no_ies"),
     (r"^sigla da ies$", "sg_ies"), (r"^organizacao academica$", "no_organizacao_academica"),
     (r"^categoria administrativa$", "no_categoria_administrativa"), (r"^codigo do curso$", "co_curso"),
     (r"^modalidade de ensino$", "no_modalidade_ensino"), (r"^codigo do municipio$", "co_municipio"),
@@ -41,7 +41,7 @@ COMUNS = [
     (r"^no de concluintes inscritos$", "qt_concluintes_inscritos"),
     (r"^no de concluintes participantes$", "qt_concluintes_participantes"),
 ]
-MAP_CPC = COMUNS + [
+MAP_CPC = COMMON_COLUMNS + [
     (r"^nota padronizada fg$", "nota_padronizada_fg"), (r"^nota padronizada ce$", "nota_padronizada_ce"),
     (r"^conceito enade continuo$", "conceito_enade_continuo"), (r"^nota padronizada idd$", "nota_padronizada_idd"),
     (r"^nota padronizada organizacao", "nota_padronizada_org_didatico"),
@@ -52,7 +52,7 @@ MAP_CPC = COMUNS + [
     (r"^nota padronizada regime", "nota_padronizada_regime"),
     (r"^cpc continuo$", "cpc_continuo"), (r"^cpc faixa$", "cpc_faixa"),
 ]
-MAP_ENADE = COMUNS + [
+MAP_ENADE = COMMON_COLUMNS + [
     (r"^total de concluinte igual", "qt_proficiente_padrao1"),
     (r"^percentual de concluintes igual", "prop_proficiente_padrao1"),
     (r"^conceito enade faixa$", "enade_faixa"), (r"^cebas$", "in_cebas"),
@@ -87,24 +87,24 @@ def _norm(h: object) -> str:
     return re.sub(r" \d$", "", t)  # nota de rodapé no fim ('Sigla da IES ¹' -> 'sigla da ies 1')
 
 
-def _limpa(v: object) -> str | None:
+def _clean(v: object) -> str | None:
     """Célula -> texto; marcadores de sem conceito/sem dado -> None."""
     if v is None:
         return None
     t = str(v).strip()
     if t.endswith(".0") and t[:-2].lstrip("-").isdigit():
         t = t[:-2]
-    return None if t.upper() in NULOS else t
+    return None if t.upper() in NULL_TOKENS else t
 
 
-def ler_xlsx_mt(path: Path, mapa: list[tuple[str, str]]) -> pd.DataFrame:
+def read_xlsx_mt(path: Path, column_map: list[tuple[str, str]]) -> pd.DataFrame:
     """Streaming do xlsx (cabeçalho na linha 1); só linhas com Sigla da UF = MT entram na memória."""
     wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
     try:
         linhas = wb.worksheets[0].iter_rows(values_only=True)
         header = [_norm(h) for h in next(linhas)]
         idx: dict[str, int] = {}
-        for rx, col in mapa:
+        for rx, col in column_map:
             achado = [i for i, h in enumerate(header) if re.search(rx, h)]
             if achado:
                 idx[col] = achado[0]
@@ -113,7 +113,7 @@ def ler_xlsx_mt(path: Path, mapa: list[tuple[str, str]]) -> pd.DataFrame:
                 raise ValueError(f"{path.name}: coluna '{obrig}' não encontrada em {header[:15]}")
         i_uf = idx["sg_uf"]
         dados = [
-            {c: _limpa(r[i]) for c, i in idx.items()}
+            {c: _clean(r[i]) for c, i in idx.items()}
             for r in linhas
             if r[i_uf] is not None and str(r[i_uf]).strip().upper() == UF
         ]
@@ -122,23 +122,23 @@ def ler_xlsx_mt(path: Path, mapa: list[tuple[str, str]]) -> pd.DataFrame:
     return pd.DataFrame(dados, dtype="object")
 
 
-def _numeros(df: pd.DataFrame, cols: list[str]) -> None:
+def _to_numeric(df: pd.DataFrame, cols: list[str]) -> None:
     for c in cols:
         if c in df:  # decimal com vírgula (CPC 2022) e valores textuais viram número ou NULL
             df[c] = pd.to_numeric(df[c].astype("string").str.replace(",", ".", regex=False), errors="coerce")
 
 
-def _finalizar(df: pd.DataFrame, ordem: list[str], faixa: str, continuos: list[str]) -> pd.DataFrame:
+def _finalize(df: pd.DataFrame, ordem: list[str], faixa: str, continuous_cols: list[str]) -> pd.DataFrame:
     df["co_municipio"] = df["co_municipio"].str.zfill(7)
     # in_sem_conceito: faixa sem número (SC/--). Valores contínuos desses cursos são NULL, não zero
     # (alguns arquivos gravam 0 no lugar do conceito).
     df["in_sem_conceito"] = df[faixa].isna() | (pd.to_numeric(df[faixa], errors="coerce").isna())
-    _numeros(df, [c for c in df.columns if c.startswith(("nota_", "conceito_", "cpc_c", "prop_"))])
+    _to_numeric(df, [c for c in df.columns if c.startswith(("nota_", "conceito_", "cpc_c", "prop_"))])
     sem = df["in_sem_conceito"]
-    for c in continuos:
+    for c in continuous_cols:
         if c in df:
             df.loc[sem, c] = pd.NA
-    _numeros(df, INTS)
+    _to_numeric(df, INTS)
     for c in INTS:
         if c in df:
             df[c] = df[c].round().astype("Int64")
@@ -148,58 +148,58 @@ def _finalizar(df: pd.DataFrame, ordem: list[str], faixa: str, continuos: list[s
     return df[ordem]
 
 
-def carregar_cpc(raiz: Path) -> pd.DataFrame:
+def load_cpc(root_dir: Path) -> pd.DataFrame:
     partes = []
-    for p in sorted(raiz.glob("*.xlsx")):
+    for p in sorted(root_dir.glob("*.xlsx")):
         m = re.fullmatch(r"cpc_(2021|2022|2023)\.xlsx", p.name, flags=re.I)
         if not m:
             continue
-        df = ler_xlsx_mt(p, MAP_CPC)
+        df = read_xlsx_mt(p, MAP_CPC)
         log.info("cpc %s: %d cursos de MT", p.name, len(df))
         partes.append(df)
     if len(partes) != 3:
-        raise SystemExit(f"Esperados CPC_2021, cpc_2022 e CPC_2023 em {raiz}; achados {len(partes)}")
+        raise SystemExit(f"Esperados CPC_2021, cpc_2022 e CPC_2023 em {root_dir}; achados {len(partes)}")
     df = pd.concat(partes, ignore_index=True).rename(columns={"nu_ano": "nu_ano_cpc"})
-    df = _finalizar(df, ORD_CPC, "cpc_faixa", ["cpc_continuo", "conceito_enade_continuo"])
-    _validar(df, ["nu_ano_cpc", "co_curso", "co_municipio"], "CPC")
+    df = _finalize(df, ORD_CPC, "cpc_faixa", ["cpc_continuo", "conceito_enade_continuo"])
+    _validate(df, ["nu_ano_cpc", "co_curso", "co_municipio"], "CPC")
     log.info("CPC: %d linhas MT | sem conceito: %d | anos %s", len(df), int(df["in_sem_conceito"].sum()),
              sorted(df["nu_ano_cpc"].dropna().unique().tolist()))
     return df
 
 
-def carregar_enade(raiz: Path) -> pd.DataFrame:
-    p = raiz / "conceito_enade_licenciaturas.xlsx"
+def load_enade(root_dir: Path) -> pd.DataFrame:
+    p = root_dir / "conceito_enade_licenciaturas.xlsx"
     if not p.exists():
         raise SystemExit(f"{p} não encontrado")
-    df = ler_xlsx_mt(p, MAP_ENADE).rename(columns={"nu_ano": "nu_ano_enade"})
-    df = _finalizar(df, ORD_ENADE, "enade_faixa", ["prop_proficiente_padrao1"])
+    df = read_xlsx_mt(p, MAP_ENADE).rename(columns={"nu_ano": "nu_ano_enade"})
+    df = _finalize(df, ORD_ENADE, "enade_faixa", ["prop_proficiente_padrao1"])
     # Edição especial 2025: o 'Percentual' é proporção (0 a 1); se vier em % (>1), converte.
     if (df["prop_proficiente_padrao1"].dropna() > 1).any():
         df["prop_proficiente_padrao1"] = df["prop_proficiente_padrao1"] / 100
-    _validar(df, ["nu_ano_enade", "co_curso", "co_municipio"], "Enade")
+    _validate(df, ["nu_ano_enade", "co_curso", "co_municipio"], "Enade")
     log.info("Enade licenciaturas: %d linhas MT | sem conceito: %d | anos %s", len(df),
              int(df["in_sem_conceito"].sum()), sorted(df["nu_ano_enade"].dropna().unique().tolist()))
     return df
 
 
-def _validar(df: pd.DataFrame, chave: list[str], nome: str) -> None:
+def _validate(df: pd.DataFrame, key: list[str], label: str) -> None:
     if set(df["sg_uf"]) != {UF}:
-        raise ValueError(f"{nome}: restaram UFs fora de MT: {set(df['sg_uf'])}")
-    dup = int(df.duplicated(chave).sum())
+        raise ValueError(f"{label}: restaram UFs fora de MT: {set(df['sg_uf'])}")
+    dup = int(df.duplicated(key).sum())
     if dup:
-        raise ValueError(f"{nome}: {dup} linhas duplicadas em {chave}")
+        raise ValueError(f"{label}: {dup} linhas duplicadas em {key}")
 
 
 # ------------------------------------------------------------------- Match / saída
-def carregar_trajetoria(raw: Path) -> pd.DataFrame:
+def load_trajectory(raw: Path) -> pd.DataFrame:
     """Reaproveita a leitura de src/01_trajectory_ingestion.py (MT + Graduação)."""
     spec = importlib.util.spec_from_file_location("trajectory_ingestion", Path(__file__).with_name("01_trajectory_ingestion.py"))
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    return mod.carregar_raw(raw, mod.UF_MT).rename(columns=str.lower)
+    return mod.load_raw(raw, mod.UF_MT).rename(columns=str.lower)
 
 
-def logar_match(traj: pd.DataFrame, cpc: pd.DataFrame, enade: pd.DataFrame) -> None:
+def log_match(traj: pd.DataFrame, cpc: pd.DataFrame, enade: pd.DataFrame) -> None:
     cursos_traj = set(traj["co_curso"])
     cursos_lic = set(traj.loc[traj["tp_grau_academico"] == "2", "co_curso"])
     cpc_cursos = set(cpc["co_curso"])
@@ -215,11 +215,11 @@ def logar_match(traj: pd.DataFrame, cpc: pd.DataFrame, enade: pd.DataFrame) -> N
              n3, len(en), pct(n3, len(en)), len(en) - n3)
 
 
-def extrair(traj: pd.DataFrame, cpc: pd.DataFrame, enade: pd.DataFrame, out: Path) -> None:
-    p4 = p4_cpc_vs_desistencia(traj, cpc)
-    p5 = p5_funil_licenciaturas(traj, enade)
-    gravar_csv(p4, out / "p4_cpc_vs_desistencia.csv")
-    gravar_csv(p5, out / "p5_funil_licenciaturas.csv")
+def extract(traj: pd.DataFrame, cpc: pd.DataFrame, enade: pd.DataFrame, out: Path) -> None:
+    p4 = p4_cpc_vs_dropout(traj, cpc)
+    p5 = p5_teaching_degree_funnel(traj, enade)
+    write_csv_atomic(p4, out / "p4_cpc_vs_desistencia.csv")
+    write_csv_atomic(p5, out / "p5_funil_licenciaturas.csv")
     if p4.empty or p5.empty:
         raise RuntimeError("P4 ou P5 sem linhas — verifique a carga e o match com a Trajetória.")
     k = p4.iloc[0]
@@ -238,12 +238,12 @@ def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
     log.info("[1/3] Leitura e filtro em memória (UF = MT)")
-    cpc, enade = carregar_cpc(Path(a.raw)), carregar_enade(Path(a.raw))
-    traj = carregar_trajetoria(Path(a.traj))
+    cpc, enade = load_cpc(Path(a.raw)), load_enade(Path(a.raw))
+    traj = load_trajectory(Path(a.traj))
     log.info("[2/3] Taxa de match com a Trajetória")
-    logar_match(traj, cpc, enade)
+    log_match(traj, cpc, enade)
     log.info("[3/3] P4 e P5 em pandas")
-    extrair(traj, cpc, enade, Path(a.out))
+    extract(traj, cpc, enade, Path(a.out))
     return 0
 
 

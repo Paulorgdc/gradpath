@@ -2,10 +2,7 @@
 
 A Python/Pandas pipeline that turns raw Inep/MEC microdata into dropout and retention indicators for higher education in Mato Grosso, ready for Power BI.
 
-[![Category](https://img.shields.io/badge/CATEGORY-ACADEMIC%20%2F%20HACKATHON-e0004d?style=for-the-badge)](#)
-[![UNIVAG](https://img.shields.io/badge/UNIVAG%20%2F%20DATAHACK%202026-555555?style=for-the-badge)](#)
-[![Tech Stack](https://img.shields.io/badge/PYTHON%20%7C%20PANDAS%20%7C%20POWER%20BI-00c8ff?style=for-the-badge)](#)
-[![License](https://img.shields.io/badge/LICENSE-MIT-76b900?style=for-the-badge)](#)
+[![Category](https://img.shields.io/badge/CATEGORY-ACADEMIC%20PROJECT-e0004d?style=for-the-badge)](#)[![UNIVAG](https://img.shields.io/badge/UNIVAG-DATAHACK%202026-00c8ff?style=for-the-badge)](#)[![License](https://img.shields.io/badge/LICENSE-MIT-76b900?style=for-the-badge)](#)
 
 ---
 

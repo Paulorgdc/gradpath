@@ -1,22 +1,19 @@
-"""Indicadores de Qualidade do INEP (CPC 2021-2023, Enade Licenciaturas 2025) -> Supabase -> P4 e P5.
+"""Indicadores de Qualidade do INEP (CPC 2021-2023, Enade Licenciaturas 2025) -> pandas -> CSVs P4 e P5.
 
 1. Lê as planilhas .xlsx em streaming (cabeçalho na linha 1) e descarta na leitura tudo que não é
    'Sigla da UF' = 'MT'. Códigos (curso, IES, município) são texto; '--', 'SC' (Sem Conceito) e
    vazios viram NULL, nunca zero.
-2. Carrega public.stg_cpc_mt e public.stg_enade_licenciaturas_mt (sql/08_stg_qualidade_mt.sql) com
-   TRUNCATE + COPY na mesma transação, conferindo a contagem de linhas.
-3. Registra a taxa de match com a Trajetória (public.stg_trajetoria_mt, carregada por
-   src/01_ingestao_trajetoria_supabase.py) e executa sql/09 e sql/10 no Supabase, gravando
-   outputs/p4_cpc_vs_desistencia.csv e outputs/p5_funil_licenciaturas.csv.
+2. Lê a Trajetória (mesma leitura de src/01_trajectory_ingestion.py), registra a taxa de match por
+   co_curso e calcula P4 e P5 com pandas (src/analytics.py), gravando outputs/p4_cpc_vs_desistencia.csv
+   e outputs/p5_funil_licenciaturas.csv.
 
-Uso:  python src/03_qualidade_supabase.py [--raw archives/inep_indicadores_qualidade] [--recriar]
+Uso:  python src/03_education_quality.py [--raw data/raw/inep_indicadores_qualidade] [--traj data/raw/inep_trajetoria]
 """
 from __future__ import annotations
 
 import argparse
-import io
+import importlib.util
 import logging
-import os
 import re
 import sys
 import unicodedata
@@ -24,20 +21,16 @@ from pathlib import Path
 
 import openpyxl
 import pandas as pd
-from sqlalchemy import text
 
-from db import ROOT, get_engine, testar_conexao
+from analytics import p4_cpc_vs_desistencia, p5_funil_licenciaturas
+from common import RAW_DIR, ROOT, gravar_csv
 
 log = logging.getLogger("datahack.qualidade")
 
-SQL_DIR = ROOT / "sql"
 UF = "MT"
-T_CPC = "public.stg_cpc_mt"
-T_ENADE = "public.stg_enade_licenciaturas_mt"
-T_TRAJ = "public.stg_trajetoria_mt"
 NULOS = {"", "--", "-", "SC", "S/C", "NA", "N/A", "ND", "*", "NAN", "NONE"}  # Sem Conceito / sem dado
 
-# Cabeçalho normalizado (sem acento, minúsculo, sem pontuação) -> coluna do staging.
+# Cabeçalho normalizado (sem acento, minúsculo, sem pontuação) -> coluna do DataFrame.
 COMUNS = [
     (r"^ano$", "nu_ano"), (r"^codigo da area$", "co_area"), (r"^area de avaliacao$", "no_area_avaliacao"),
     (r"^grau academico$", "no_grau_academico"), (r"^codigo da ies$", "co_ies"), (r"^nome da ies$", "no_ies"),
@@ -65,7 +58,7 @@ MAP_ENADE = COMUNS + [
     (r"^conceito enade faixa$", "enade_faixa"), (r"^cebas$", "in_cebas"),
 ]
 
-# Ordem exata das colunas no DDL (sql/08)
+# Ordem das colunas
 ORD_CPC = [
     "nu_ano_cpc", "co_area", "no_area_avaliacao", "no_grau_academico", "co_ies", "no_ies", "sg_ies",
     "no_organizacao_academica", "no_categoria_administrativa", "co_curso", "no_modalidade_ensino", "co_municipio",
@@ -197,96 +190,34 @@ def _validar(df: pd.DataFrame, chave: list[str], nome: str) -> None:
         raise ValueError(f"{nome}: {dup} linhas duplicadas em {chave}")
 
 
-# ------------------------------------------------------------------------ Carga
-def _copy(cur, tabela: str, df: pd.DataFrame) -> None:
-    buf = io.StringIO()
-    df.to_csv(buf, index=False, header=False, na_rep="")
-    buf.seek(0)
-    cur.execute(f"SELECT count(*) FROM {tabela}")
-    antes = cur.fetchone()[0]
-    cur.execute(f"TRUNCATE TABLE {tabela}")
-    cur.copy_expert(f"COPY {tabela} ({', '.join(df.columns)}) FROM STDIN WITH (FORMAT csv, NULL '')", buf)
-    cur.execute(f"SELECT count(*) FROM {tabela}")
-    depois = cur.fetchone()[0]
-    if depois != len(df):
-        raise RuntimeError(f"{tabela}: banco={depois} vs memória={len(df)} (rollback)")
-    log.info("%s: %s -> %s linhas (truncate-and-load)", tabela, antes, depois)
-
-
-def carregar_supabase(engine, cpc: pd.DataFrame, enade: pd.DataFrame, recriar: bool) -> None:
-    with engine.begin() as conn:  # uma transação: tudo ou nada
-        cur = conn.connection.cursor()
-        if recriar:
-            log.info("--recriar: DROP das tabelas de qualidade")
-            cur.execute(f"DROP TABLE IF EXISTS {T_CPC}, {T_ENADE}")
-        cur.execute((SQL_DIR / "08_stg_qualidade_mt.sql").read_text(encoding="utf-8"))
-        _copy(cur, T_CPC, cpc)
-        _copy(cur, T_ENADE, enade)
-
-
 # ------------------------------------------------------------------- Match / saída
-SQL_MATCH = f"""
-WITH traj AS (SELECT DISTINCT co_curso FROM {T_TRAJ} WHERE co_uf = '51'),
-trajlic AS (SELECT DISTINCT co_curso FROM {T_TRAJ} WHERE co_uf = '51' AND tp_grau_academico = '2'),
-cpc AS (SELECT DISTINCT co_curso FROM {T_CPC} WHERE sg_uf = 'MT'),
-cpc_c AS (SELECT DISTINCT co_curso FROM {T_CPC} WHERE sg_uf = 'MT' AND cpc_faixa IS NOT NULL),
-en AS (SELECT DISTINCT co_curso FROM {T_ENADE} WHERE sg_uf = 'MT')
-SELECT
-  (SELECT count(*) FROM cpc)                                              AS cpc_cursos,
-  (SELECT count(*) FROM cpc WHERE co_curso IN (SELECT co_curso FROM traj)) AS cpc_com_trajetoria,
-  (SELECT count(*) FROM cpc_c)                                            AS cpc_cursos_com_conceito,
-  (SELECT count(*) FROM cpc_c WHERE co_curso IN (SELECT co_curso FROM traj)) AS cpc_conceito_com_trajetoria,
-  (SELECT count(*) FROM en)                                               AS enade_cursos,
-  (SELECT count(*) FROM en WHERE co_curso IN (SELECT co_curso FROM trajlic)) AS enade_com_trajetoria_lic
-"""
+def carregar_trajetoria(raw: Path) -> pd.DataFrame:
+    """Reaproveita a leitura de src/01_trajectory_ingestion.py (MT + Graduação)."""
+    spec = importlib.util.spec_from_file_location("trajectory_ingestion", Path(__file__).with_name("01_trajectory_ingestion.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.carregar_raw(raw, mod.UF_MT).rename(columns=str.lower)
 
 
-def logar_match(engine) -> None:
-    with engine.connect() as conn:
-        if not conn.execute(text(f"SELECT to_regclass('{T_TRAJ}') IS NOT NULL")).scalar():
-            raise SystemExit(f"{T_TRAJ} não existe: rode antes src/01_ingestao_trajetoria_supabase.py")
-        if conn.execute(text(f"SELECT count(*) FROM {T_TRAJ}")).scalar() == 0:
-            raise SystemExit(f"{T_TRAJ} está vazia: rode antes src/01_ingestao_trajetoria_supabase.py")
-        r = conn.execute(text(SQL_MATCH)).one()
+def logar_match(traj: pd.DataFrame, cpc: pd.DataFrame, enade: pd.DataFrame) -> None:
+    cursos_traj = set(traj["co_curso"])
+    cursos_lic = set(traj.loc[traj["tp_grau_academico"] == "2", "co_curso"])
+    cpc_cursos = set(cpc["co_curso"])
+    cpc_c = set(cpc.loc[cpc["cpc_faixa"].notna(), "co_curso"])
+    en = set(enade["co_curso"])
     pct = lambda a, b: f"{100 * a / b:.1f}%" if b else "n/a"
+    n1, n2, n3 = len(cpc_cursos & cursos_traj), len(cpc_c & cursos_traj), len(en & cursos_lic)
     log.info("MATCH P4 (CPC x Trajetória, via co_curso): %d/%d cursos casaram (%s); %d ficaram de fora",
-             r.cpc_com_trajetoria, r.cpc_cursos, pct(r.cpc_com_trajetoria, r.cpc_cursos), r.cpc_cursos - r.cpc_com_trajetoria)
+             n1, len(cpc_cursos), pct(n1, len(cpc_cursos)), len(cpc_cursos) - n1)
     log.info("MATCH P4 (só cursos com conceito CPC): %d/%d casaram (%s); %d de fora",
-             r.cpc_conceito_com_trajetoria, r.cpc_cursos_com_conceito,
-             pct(r.cpc_conceito_com_trajetoria, r.cpc_cursos_com_conceito),
-             r.cpc_cursos_com_conceito - r.cpc_conceito_com_trajetoria)
+             n2, len(cpc_c), pct(n2, len(cpc_c)), len(cpc_c) - n2)
     log.info("MATCH P5 (Enade Licenciaturas x Trajetória grau 2): %d/%d cursos casaram (%s); %d de fora",
-             r.enade_com_trajetoria_lic, r.enade_cursos, pct(r.enade_com_trajetoria_lic, r.enade_cursos),
-             r.enade_cursos - r.enade_com_trajetoria_lic)
+             n3, len(en), pct(n3, len(en)), len(en) - n3)
 
 
-def validar_somente_mt(engine) -> None:
-    with engine.connect() as conn:
-        ufs = {r[0] for t in (T_CPC, T_ENADE) for r in conn.execute(text(f"SELECT DISTINCT sg_uf FROM {t}"))}
-    if ufs != {UF}:
-        raise RuntimeError(f"Staging fora do escopo: sg_uf={ufs}")
-    log.info("Validação: %s e %s contêm somente sg_uf=%s", T_CPC, T_ENADE, UF)
-
-
-def executar_sql(engine, arquivo: str) -> pd.DataFrame:
-    with engine.connect() as conn:
-        return pd.read_sql(text((SQL_DIR / arquivo).read_text(encoding="utf-8")), conn)
-
-
-def gravar_csv(df: pd.DataFrame, destino: Path) -> None:
-    destino.parent.mkdir(parents=True, exist_ok=True)
-    tmp = destino.with_name(destino.name + ".tmp")
-    try:
-        df.to_csv(tmp, index=False, encoding="utf-8", lineterminator="\n")
-        os.replace(tmp, destino)
-    finally:
-        tmp.unlink(missing_ok=True)
-    log.info("Gravado %s (%d linhas)", destino.relative_to(ROOT), len(df))
-
-
-def extrair(engine, out: Path) -> None:
-    p4 = executar_sql(engine, "09_p4_qualidade_retencao.sql")
-    p5 = executar_sql(engine, "10_p5_funil_licenciaturas.sql")
+def extrair(traj: pd.DataFrame, cpc: pd.DataFrame, enade: pd.DataFrame, out: Path) -> None:
+    p4 = p4_cpc_vs_desistencia(traj, cpc)
+    p5 = p5_funil_licenciaturas(traj, enade)
     gravar_csv(p4, out / "p4_cpc_vs_desistencia.csv")
     gravar_csv(p5, out / "p5_funil_licenciaturas.csv")
     if p4.empty or p5.empty:
@@ -300,26 +231,19 @@ def extrair(engine, out: Path) -> None:
 # ------------------------------------------------------------------------- Main
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--raw", default=os.environ.get("QUALIDADE_RAW", str(ROOT / "archives" / "inep_indicadores_qualidade")))
+    ap.add_argument("--raw", default=str(RAW_DIR / "inep_indicadores_qualidade"))
+    ap.add_argument("--traj", default=str(RAW_DIR / "inep_trajetoria"))
     ap.add_argument("--out", default=str(ROOT / "outputs"))
-    ap.add_argument("--recriar", action="store_true", help="DROP + CREATE das tabelas (mudança de schema)")
-    ap.add_argument("--so-consultas", action="store_true", help="pula leitura/carga e recalcula P4/P5 do que está no banco")
     a = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
-    engine = get_engine()
-    if not testar_conexao(engine):
-        return 1
-    if not a.so_consultas:
-        log.info("[1/4] Leitura e filtro em memória (UF = MT)")
-        cpc, enade = carregar_cpc(Path(a.raw)), carregar_enade(Path(a.raw))
-        log.info("[2/4] Carga no Supabase")
-        carregar_supabase(engine, cpc, enade, a.recriar)
-    validar_somente_mt(engine)
-    log.info("[3/4] Taxa de match com a Trajetória")
-    logar_match(engine)
-    log.info("[4/4] P4 e P5 no Supabase")
-    extrair(engine, Path(a.out))
+    log.info("[1/3] Leitura e filtro em memória (UF = MT)")
+    cpc, enade = carregar_cpc(Path(a.raw)), carregar_enade(Path(a.raw))
+    traj = carregar_trajetoria(Path(a.traj))
+    log.info("[2/3] Taxa de match com a Trajetória")
+    logar_match(traj, cpc, enade)
+    log.info("[3/3] P4 e P5 em pandas")
+    extrair(traj, cpc, enade, Path(a.out))
     return 0
 
 

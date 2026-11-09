@@ -1,7 +1,3 @@
 pandas
 openpyxl
-pyarrow
 requests
-sqlalchemy
-psycopg2-binary
-python-dotenv

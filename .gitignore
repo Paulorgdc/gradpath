@@ -1,12 +1,6 @@
 # Dados brutos (Censo > 450 MB; GitHub rejeita arquivos > 100 MB)
 data/
-archives/
-*.csv.tmp
-*.parquet.tmp
 *.tmp
-*.duckdb
-*.duckdb.wal
-*.db
 
 # Ambientes virtuais
 .venv/

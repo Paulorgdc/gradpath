@@ -1,25 +1,25 @@
 nu_ano_censo,tp_rede,grupo_rede,tp_modalidade_ensino,modalidade,n_cursos,qt_mat,qt_desvinculado,qt_transferido,base_alunos,evasao_anual_pct
-2021,1,Pública,1,Presencial,263,45450.0,2074.0,123.0,47647.0,4.3528
-2021,1,Pública,2,EAD,27,4884.0,512.0,0.0,5396.0,9.4885
-2021,2,Privada com fins lucrativos,1,Presencial,348,39976.0,12634.0,82.0,52692.0,23.9771
-2021,2,Privada com fins lucrativos,2,EAD,1528,71475.0,27648.0,1088.0,100211.0,27.5898
-2021,2,Privada sem fins lucrativos,1,Presencial,131,11876.0,2315.0,45.0,14236.0,16.2616
-2021,2,Privada sem fins lucrativos,2,EAD,437,2895.0,1071.0,11.0,3977.0,26.9298
-2022,1,Pública,1,Presencial,267,45706.0,2550.0,8.0,48264.0,5.2834
-2022,1,Pública,2,EAD,26,4125.0,353.0,0.0,4478.0,7.883
-2022,2,Privada com fins lucrativos,1,Presencial,388,38223.0,13231.0,44.0,51498.0,25.6923
-2022,2,Privada com fins lucrativos,2,EAD,1930,82018.0,44326.0,971.0,127315.0,34.816
-2022,2,Privada sem fins lucrativos,1,Presencial,127,11249.0,2322.0,114.0,13685.0,16.9675
-2022,2,Privada sem fins lucrativos,2,EAD,493,3168.0,1791.0,15.0,4974.0,36.0072
-2023,1,Pública,1,Presencial,295,43725.0,10375.0,1.0,54101.0,19.1771
-2023,1,Pública,2,EAD,25,4222.0,1046.0,0.0,5268.0,19.8557
-2023,2,Privada com fins lucrativos,1,Presencial,391,37039.0,9993.0,87.0,47119.0,21.208
-2023,2,Privada com fins lucrativos,2,EAD,2321,91545.0,47101.0,1170.0,139816.0,33.6878
-2023,2,Privada sem fins lucrativos,1,Presencial,124,11764.0,1946.0,136.0,13846.0,14.0546
-2023,2,Privada sem fins lucrativos,2,EAD,472,3040.0,1214.0,26.0,4280.0,28.3645
-2024,1,Pública,1,Presencial,314,41947.0,2983.0,48.0,44978.0,6.6321
-2024,1,Pública,2,EAD,26,4873.0,327.0,2.0,5202.0,6.286
-2024,2,Privada com fins lucrativos,1,Presencial,382,37171.0,10616.0,62.0,47849.0,22.1865
-2024,2,Privada com fins lucrativos,2,EAD,2558,91276.0,57804.0,1450.0,150530.0,38.4003
-2024,2,Privada sem fins lucrativos,1,Presencial,127,11211.0,2268.0,253.0,13732.0,16.5162
-2024,2,Privada sem fins lucrativos,2,EAD,480,3231.0,1200.0,37.0,4468.0,26.8577
+2021,1,Pública,1,Presencial,263,45450,2074,123,47647,4.3528
+2021,1,Pública,2,EAD,27,4884,512,0,5396,9.4885
+2021,2,Privada com fins lucrativos,1,Presencial,348,39976,12634,82,52692,23.9771
+2021,2,Privada com fins lucrativos,2,EAD,1528,71475,27648,1088,100211,27.5898
+2021,2,Privada sem fins lucrativos,1,Presencial,131,11876,2315,45,14236,16.2616
+2021,2,Privada sem fins lucrativos,2,EAD,437,2895,1071,11,3977,26.9298
+2022,1,Pública,1,Presencial,267,45706,2550,8,48264,5.2834
+2022,1,Pública,2,EAD,26,4125,353,0,4478,7.883
+2022,2,Privada com fins lucrativos,1,Presencial,388,38223,13231,44,51498,25.6923
+2022,2,Privada com fins lucrativos,2,EAD,1930,82018,44326,971,127315,34.816
+2022,2,Privada sem fins lucrativos,1,Presencial,127,11249,2322,114,13685,16.9675
+2022,2,Privada sem fins lucrativos,2,EAD,493,3168,1791,15,4974,36.0072
+2023,1,Pública,1,Presencial,295,43725,10375,1,54101,19.1771
+2023,1,Pública,2,EAD,25,4222,1046,0,5268,19.8557
+2023,2,Privada com fins lucrativos,1,Presencial,391,37039,9993,87,47119,21.208
+2023,2,Privada com fins lucrativos,2,EAD,2321,91545,47101,1170,139816,33.6878
+2023,2,Privada sem fins lucrativos,1,Presencial,124,11764,1946,136,13846,14.0546
+2023,2,Privada sem fins lucrativos,2,EAD,472,3040,1214,26,4280,28.3645
+2024,1,Pública,1,Presencial,314,41947,2983,48,44978,6.6321
+2024,1,Pública,2,EAD,26,4873,327,2,5202,6.286
+2024,2,Privada com fins lucrativos,1,Presencial,382,37171,10616,62,47849,22.1865
+2024,2,Privada com fins lucrativos,2,EAD,2558,91276,57804,1450,150530,38.4003
+2024,2,Privada sem fins lucrativos,1,Presencial,127,11211,2268,253,13732,16.5162
+2024,2,Privada sem fins lucrativos,2,EAD,480,3231,1200,37,4468,26.8577

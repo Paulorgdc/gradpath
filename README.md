@@ -61,8 +61,8 @@ outputs/*.csv  (atomic writes)  ──►  dashboard/Rota_do_Diploma.pbix
 
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/Paulorgdc/datahack-grupo6.git
-   cd datahack-grupo6
+   git clone https://github.com/Paulorgdc/gradpath.git
+   cd gradpath
    ```
 2. **Create the environment and install dependencies:**
    ```bash

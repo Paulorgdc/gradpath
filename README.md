@@ -53,7 +53,7 @@ outputs/*.csv  (atomic writes)  ──►  dashboard/Rota_do_Diploma.pbix
 |---|---|
 | `src/common.py` | Project paths (`RAW_DIR = data/raw/`) and atomic CSV writing |
 | `src/analytics.py` | Indicators P1 to P5, B1 and B2 |
-| `docs/architecture.md`, `docs/strategy.md` | Architecture and analytical decisions |
+| `dashboard/` | Delivered report: Power BI, PDF and architecture infographic |
 
 ---
 
@@ -78,3 +78,9 @@ outputs/*.csv  (atomic writes)  ──►  dashboard/Rota_do_Diploma.pbix
    python src/03_education_quality.py
    ```
 5. **Open `dashboard/Rota_do_Diploma.pbix`** in Power BI and refresh from `outputs/`.
+
+---
+
+## 📦 Deliverables
+
+`dashboard/` holds what was delivered to the challenge: the Power BI report (`Rota_do_Diploma.pbix`), its PDF export (`Rota_do_Diploma_Grupo6.pdf`) and the architecture infographic (`infographic_powerbi_architecture_v2.png`).
